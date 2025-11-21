@@ -1,0 +1,1045 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Highway Drowsiness Guard v3 – Long Distance</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- TensorFlow.js & MediaPipe FaceMesh -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.20.0/dist/tf-core.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.20.0/dist/tf-converter.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.20.0/dist/tf-backend-webgl.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@1.1.0/dist/face-landmarks-detection.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #020617;
+      --card: #020617;
+      --card-inner: #020617;
+      --accent: #22c55e;
+      --accent-soft: rgba(34, 197, 94, 0.25);
+      --danger: #f97373;
+      --danger-soft: rgba(248, 113, 113, 0.2);
+      --text-main: #e5e7eb;
+      --text-soft: #9ca3af;
+      --border-soft: #1f2937;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      background: radial-gradient(circle at top, #020617, #020617 40%, #000);
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .shell {
+      width: 100%;
+      max-width: 1120px;
+      border-radius: 24px;
+      padding: 18px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      background:
+        radial-gradient(circle at 0% 0%, rgba(34, 197, 94, 0.05), transparent 60%),
+        radial-gradient(circle at 100% 0%, rgba(56, 189, 248, 0.06), transparent 55%),
+        linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(15, 23, 42, 0.99));
+      box-shadow:
+        0 0 0 1px rgba(15, 23, 42, 0.9),
+        0 30px 80px rgba(0, 0, 0, 0.8);
+    }
+
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    .title-block h1 {
+      font-size: 1.35rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+
+    .title-accent {
+      background: linear-gradient(90deg, #22c55e, #a855f7);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .subtitle {
+      font-size: 0.8rem;
+      color: var(--text-soft);
+      margin-top: 4px;
+    }
+
+    .subtitle strong {
+      color: #e5e7eb;
+      font-weight: 600;
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .chip {
+      font-size: 0.68rem;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      color: var(--text-soft);
+      background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.96));
+    }
+
+    .status-block {
+      text-align: right;
+      min-width: 210px;
+    }
+
+    .status-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      color: var(--text-soft);
+    }
+
+    .status-value {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      margin-top: 4px;
+      font-size: 0.78rem;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      background: radial-gradient(circle at top, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.98));
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #9ca3af;
+      box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.1);
+    }
+
+    .status-value.running .status-dot {
+      background: #22c55e;
+      box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.3);
+    }
+
+    .status-value.stopped .status-dot {
+      background: #f97316;
+      box-shadow: 0 0 0 4px rgba(248, 113, 22, 0.25);
+    }
+
+    .status-meta {
+      font-size: 0.7rem;
+      color: var(--text-soft);
+      margin-top: 4px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 2.1fr) minmax(0, 1.4fr);
+      gap: 14px;
+    }
+
+    @media (max-width: 860px) {
+      .grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .status-block {
+        text-align: left;
+      }
+    }
+
+    .video-card {
+      border-radius: 18px;
+      border: 1px solid var(--border-soft);
+      background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.99));
+      padding: 10px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .video-shell {
+      position: relative;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #020617;
+      border: 1px solid rgba(31, 41, 55, 0.8);
+      aspect-ratio: 16 / 9;
+    }
+
+    video,
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .video-badge {
+      position: absolute;
+      left: 10px;
+      top: 10px;
+      font-size: 0.7rem;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid rgba(148, 163, 184, 0.5);
+      color: var(--text-soft);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      z-index: 5;
+    }
+
+    .video-badge span.dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #ef4444;
+      box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.3);
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 1; }
+      70% { transform: scale(1.7); opacity: 0; }
+      100% { transform: scale(1); opacity: 0; }
+    }
+
+    .overlay-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 9px;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .stat-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .stat-pill {
+      min-width: 130px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.35);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.72rem;
+      color: var(--text-soft);
+    }
+
+    .stat-pill strong {
+      font-size: 0.8rem;
+      color: var(--text-main);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    button {
+      border: none;
+      outline: none;
+      border-radius: 999px;
+      padding: 5px 14px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(15, 23, 42, 0.95);
+      color: var(--text-main);
+      border: 1px solid rgba(148, 163, 184, 0.5);
+      transition: background 0.16s ease, transform 0.08s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+    }
+
+    button.primary {
+      background: radial-gradient(circle at top, rgba(34, 197, 94, 0.18), rgba(22, 163, 74, 0.9));
+      border-color: rgba(74, 222, 128, 0.9);
+      box-shadow: 0 10px 25px rgba(22, 163, 74, 0.45);
+    }
+
+    button.danger {
+      background: radial-gradient(circle at top, rgba(248, 113, 113, 0.16), rgba(239, 68, 68, 0.9));
+      border-color: rgba(248, 113, 113, 0.9);
+      box-shadow: 0 10px 25px rgba(248, 113, 113, 0.45);
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.9);
+    }
+
+    button:active {
+      transform: translateY(0);
+      box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+    }
+
+    .right-column {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .alert-banner {
+      border-radius: 16px;
+      padding: 8px 10px;
+      border: 1px dashed rgba(148, 163, 184, 0.6);
+      background: radial-gradient(circle at left, rgba(148, 163, 184, 0.14), rgba(15, 23, 42, 0.98));
+      font-size: 0.76rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      opacity: 0.8;
+      transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
+    }
+
+    .alert-banner.active {
+      background: radial-gradient(circle at left, rgba(248, 113, 113, 0.24), rgba(15, 23, 42, 0.98));
+      border-style: solid;
+      border-color: rgba(248, 113, 113, 0.9);
+      box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.6), 0 18px 45px rgba(127, 29, 29, 0.8);
+      opacity: 1;
+      transform: translateY(-1px);
+    }
+
+    .alert-pill {
+      width: 22px;
+      height: 22px;
+      border-radius: 999px;
+      background: radial-gradient(circle at top, rgba(248, 250, 252, 0.1), rgba(15, 23, 42, 1));
+      border: 1px solid rgba(148, 163, 184, 0.8);
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .alert-pill::before,
+    .alert-pill::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      border-radius: 999px;
+    }
+
+    .alert-pill::before {
+      width: 11px;
+      height: 11px;
+      border: 2px solid rgba(148, 163, 184, 0.9);
+    }
+
+    .alert-pill::after {
+      width: 5px;
+      height: 5px;
+      background: #22c55e;
+    }
+
+    .alert-banner.active .alert-pill::after {
+      background: #f97373;
+      box-shadow: 0 0 14px rgba(248, 113, 113, 0.9);
+    }
+
+    .alert-text-main {
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+
+    .alert-text-sub {
+      font-size: 0.72rem;
+      color: var(--text-soft);
+    }
+
+    .metrics-card {
+      border-radius: 18px;
+      border: 1px solid var(--border-soft);
+      background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.99));
+      padding: 10px;
+    }
+
+    .metrics-title {
+      font-size: 0.86rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    @media (max-width: 480px) {
+      .metrics-grid {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+
+    .metric-chip {
+      border-radius: 12px;
+      padding: 6px 8px;
+      border: 1px solid rgba(55, 65, 81, 0.9);
+      background: radial-gradient(circle at top, rgba(15, 23, 42, 0.97), rgba(15, 23, 42, 1));
+      font-size: 0.72rem;
+    }
+
+    .metric-label {
+      color: var(--text-soft);
+      font-size: 0.68rem;
+      margin-bottom: 3px;
+    }
+
+    .metric-value {
+      font-variant-numeric: tabular-nums;
+      font-size: 0.9rem;
+    }
+
+    .metric-footnote {
+      margin-top: 6px;
+      font-size: 0.66rem;
+      color: var(--text-soft);
+    }
+
+    .log-card {
+      border-radius: 18px;
+      border: 1px solid var(--border-soft);
+      background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.94), rgba(15, 23, 42, 0.99));
+      padding: 10px;
+      max-height: 210px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .log-title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+
+    .log-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .log-count {
+      font-size: 0.68rem;
+      color: var(--text-soft);
+    }
+
+    .log-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      overflow-y: auto;
+      font-size: 0.72rem;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(148, 163, 184, 0.6) transparent;
+    }
+
+    .log-list::-webkit-scrollbar {
+      width: 5px;
+    }
+
+    .log-list::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.6);
+      border-radius: 999px;
+    }
+
+    .log-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 4px 0;
+      border-bottom: 1px dashed rgba(31, 41, 55, 0.9);
+    }
+
+    .log-item:last-child {
+      border-bottom: none;
+    }
+
+    .log-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      margin-top: 4px;
+      background: rgba(148, 163, 184, 0.8);
+    }
+
+    .log-dot.danger {
+      background: #f97373;
+    }
+
+    .log-meta {
+      color: var(--text-soft);
+      font-size: 0.68rem;
+    }
+
+    .log-main {
+      font-size: 0.74rem;
+    }
+
+    .footnote {
+      margin-top: 6px;
+      font-size: 0.64rem;
+      color: var(--text-soft);
+    }
+
+    .highlight {
+      color: #facc15;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="header-row">
+      <div class="title-block">
+        <h1>
+          <span class="title-accent">Highway Drowsiness Guard</span>
+        </h1>
+        <p class="subtitle">
+          Prototype dash-cam for trucks — targeting the
+          <strong>~54.75% highway accidents</strong> linked to drowsy driving.
+        </p>
+        <div class="chip-row">
+          <span class="chip">Webcam-only · No install</span>
+          <span class="chip">MediaPipe FaceMesh</span>
+          <span class="chip">Blink rate · Drowsiness timer</span>
+        </div>
+      </div>
+
+      <div class="status-block">
+        <div class="status-label">System status</div>
+        <div id="statusBadge" class="status-value stopped">
+          <span class="status-dot"></span>
+          <span id="statusText">Idle – click Start</span>
+        </div>
+        <div class="status-meta">
+          Camera permission is needed only inside your browser. Video never leaves this page.
+        </div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="video-card">
+        <div class="video-shell">
+          <div class="video-badge">
+            <span class="dot"></span>
+            <span>Cab camera</span>
+          </div>
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="overlay"></canvas>
+        </div>
+
+        <div class="overlay-strip">
+          <div class="stat-group">
+            <div class="stat-pill">
+              <span>Eye state</span>
+              <strong id="eyeState">—</strong>
+            </div>
+            <div class="stat-pill">
+              <span>Blinks / min</span>
+              <strong id="blinkRate">0.0</strong>
+            </div>
+            <div class="stat-pill">
+              <span>Eyes closed</span>
+              <strong id="drowsyTimer">0.0 s</strong>
+            </div>
+          </div>
+
+          <div class="controls">
+            <button class="primary" id="startBtn">
+              ▶ Start monitoring
+            </button>
+            <button class="danger" id="stopBtn">
+              ■ Stop & release camera
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="right-column">
+        <div id="alertBanner" class="alert-banner">
+          <div class="alert-pill"></div>
+          <div>
+            <div class="alert-text-main" id="alertTitle">No drowsiness detected.</div>
+            <div class="alert-text-sub" id="alertDetail">
+              Eyes open or normal blinking. System is watching for long closures & fatigue patterns.
+            </div>
+          </div>
+        </div>
+
+        <div class="metrics-card">
+          <div class="metrics-title">Driver fatigue indicators (live)</div>
+          <div class="metrics-grid">
+            <div class="metric-chip">
+              <div class="metric-label">Current EAR (Eye Aspect Ratio)</div>
+              <div class="metric-value" id="earValue">—</div>
+            </div>
+            <div class="metric-chip">
+              <div class="metric-label">Blink counter (session)</div>
+              <div class="metric-value" id="blinkCount">0</div>
+            </div>
+            <div class="metric-chip">
+              <div class="metric-label">Monitoring time</div>
+              <div class="metric-value" id="sessionTime">0:00</div>
+            </div>
+            <div class="metric-chip">
+              <div class="metric-label">Drowsiness threshold</div>
+              <div class="metric-value"><span id="thresholdSeconds">2.0</span> s closed</div>
+            </div>
+            <div class="metric-chip">
+              <div class="metric-label">Detection confidence</div>
+              <div class="metric-value" id="confidenceScore">—</div>
+            </div>
+          </div>
+          <p class="metric-footnote">
+            EAR falls as eyelids close. When eyes stay below the threshold for longer than
+            <span class="highlight" id="thresholdLabel">2 seconds</span>, a
+            <span class="highlight">DROWSINESS ALERT</span> is raised.
+          </p>
+        </div>
+
+        <div class="log-card">
+          <div class="log-title-row">
+            <div class="log-title">Alert & event log</div>
+            <div class="log-count"><span id="alertCount">0</span> drowsiness events</div>
+          </div>
+          <ul id="eventLog" class="log-list"></ul>
+          <p class="footnote">
+            When a drowsiness alert fires, this prototype opens an email window to notify
+            the <span class="highlight">traffic authority</span> and the
+            <span class="highlight">truck owner</span>. Edit those email IDs directly in the code.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ======= CONFIGS =======
+    const EAR_THRESHOLD = 0.22;
+    const DROWSY_SECONDS = 2.0;
+    const MIN_BLINK_DURATION_MS = 80;
+    const STABLE_FRAMES_FOR_BLINK = 2;
+
+    const LEFT_EYE_INDICES = [33, 160, 158, 133, 153, 144];
+    const RIGHT_EYE_INDICES = [362, 385, 387, 263, 373, 380];
+
+    const ALERT_EMAILS = [
+      "traffic.police@example.com",
+      "truck.owner@example.com"
+    ];
+
+    // DOM
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("overlay");
+    const ctx = canvas.getContext("2d");
+
+    const statusBadge = document.getElementById("statusBadge");
+    const statusText = document.getElementById("statusText");
+    const eyeStateEl = document.getElementById("eyeState");
+    const blinkRateEl = document.getElementById("blinkRate");
+    const drowsyTimerEl = document.getElementById("drowsyTimer");
+    const earValueEl = document.getElementById("earValue");
+    const blinkCountEl = document.getElementById("blinkCount");
+    const sessionTimeEl = document.getElementById("sessionTime");
+    const alertBanner = document.getElementById("alertBanner");
+    const alertTitle = document.getElementById("alertTitle");
+    const alertDetail = document.getElementById("alertDetail");
+    const eventLog = document.getElementById("eventLog");
+    const alertCountEl = document.getElementById("alertCount");
+    const thresholdSecondsEl = document.getElementById("thresholdSeconds");
+    const thresholdLabelEl = document.getElementById("thresholdLabel");
+    const confidenceEl = document.getElementById("confidenceScore");
+
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+
+    thresholdSecondsEl.textContent = DROWSY_SECONDS.toFixed(1);
+    thresholdLabelEl.textContent = `${DROWSY_SECONDS.toFixed(0)} seconds`;
+
+    // STATE
+    let model = null;
+    let running = false;
+    let animationFrameId = null;
+    let stream = null;
+
+    let blinks = 0;
+    let eyesClosed = false;
+    let lastClosedFrameStart = null;
+    let closedFrames = 0;
+    let startTime = null;
+    let lastFrameTime = null;
+    let alertCount = 0;
+
+    function distance(a, b) {
+      const dx = a[0] - b[0];
+      const dy = a[1] - b[1];
+      return Math.hypot(dx, dy);
+    }
+
+    function computeEAR(landmarks, indices) {
+      if (!landmarks || landmarks.length < 400) return null;
+      const [p1i, p2i, p3i, p4i, p5i, p6i] = indices;
+      const p1 = landmarks[p1i];
+      const p2 = landmarks[p2i];
+      const p3 = landmarks[p3i];
+      const p4 = landmarks[p4i];
+      const p5 = landmarks[p5i];
+      const p6 = landmarks[p6i];
+      if (!p1 || !p2 || !p3 || !p4 || !p5 || !p6) return null;
+
+      const vertical1 = distance([p2.x, p2.y], [p6.x, p6.y]);
+      const vertical2 = distance([p3.x, p3.y], [p5.x, p5.y]);
+      const horizontal = distance([p1.x, p1.y], [p4.x, p4.y]);
+      if (horizontal === 0) return null;
+      return (vertical1 + vertical2) / (2.0 * horizontal);
+    }
+
+    function formatDuration(ms) {
+      const totalSeconds = Math.floor(ms / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+    }
+
+    function logEvent(type, message) {
+      const li = document.createElement("li");
+      li.className = "log-item";
+
+      const dot = document.createElement("div");
+      dot.className = "log-dot" + (type === "alert" ? " danger" : "");
+
+      const body = document.createElement("div");
+      const stamp = new Date().toLocaleTimeString();
+      body.innerHTML = `<div class="log-main">${message}</div>
+                        <div class="log-meta">${stamp}</div>`;
+
+      li.appendChild(dot);
+      li.appendChild(body);
+      eventLog.prepend(li);
+    }
+
+    function setStatus(runningState) {
+      running = runningState;
+      if (running) {
+        statusBadge.classList.remove("stopped");
+        statusBadge.classList.add("running");
+        statusText.textContent = "Monitoring – live";
+      } else {
+        statusBadge.classList.remove("running");
+        statusBadge.classList.add("stopped");
+        statusText.textContent = "Stopped – camera released";
+      }
+    }
+
+    function resetSession() {
+      blinks = 0;
+      eyesClosed = false;
+      lastClosedFrameStart = null;
+      closedFrames = 0;
+      startTime = null;
+      lastFrameTime = null;
+      alertCount = 0;
+
+      blinkCountEl.textContent = "0";
+      blinkRateEl.textContent = "0.0";
+      drowsyTimerEl.textContent = "0.0 s";
+      earValueEl.textContent = "—";
+      eyeStateEl.textContent = "—";
+      sessionTimeEl.textContent = "0:00";
+      alertCountEl.textContent = "0";
+      confidenceEl.textContent = "—";
+      alertBanner.classList.remove("active");
+      alertTitle.textContent = "No drowsiness detected.";
+      alertDetail.textContent =
+        "Eyes open or normal blinking. System is watching for long closures & fatigue patterns.";
+      eventLog.innerHTML = "";
+    }
+
+    function triggerDrowsinessAlert(closedSeconds, ear, confidenceScore) {
+      alertCount += 1;
+      alertCountEl.textContent = alertCount.toString();
+      alertBanner.classList.add("active");
+      alertTitle.textContent = "DROWSINESS ALERT – Eyes closed too long";
+      alertDetail.textContent =
+        `Eyes stayed closed for ~${closedSeconds.toFixed(1)} seconds (EAR=${ear.toFixed(2)}, conf=${(confidenceScore * 100).toFixed(1)}%).`;
+
+      logEvent(
+        "alert",
+        `Drowsiness detected – eyes closed for ~${closedSeconds.toFixed(
+          1
+        )}s. Alert #${alertCount}.`
+      );
+
+      try {
+        triggerEmailAlert(closedSeconds, ear, confidenceScore);
+      } catch (err) {
+        console.error("Email trigger failed:", err);
+        logEvent("info", "Email trigger failed in browser (check popup blockers).");
+      }
+    }
+
+    function triggerEmailAlert(closedSeconds, ear, confidenceScore) {
+      if (!ALERT_EMAILS.length) return;
+
+      const subject = encodeURIComponent("Drowsiness Alert – Highway Dashcam Prototype");
+      const bodyLines = [
+        "Automatic alert from Highway Drowsiness Guard prototype.",
+        "",
+        `Time: ${new Date().toLocaleString()}`,
+        `Estimated eyes-closed duration: ~${closedSeconds.toFixed(1)} seconds`,
+        `Estimated EAR at alert: ${ear.toFixed(3)}`,
+        `Detection confidence: ${(confidenceScore * 100).toFixed(1)}%`,
+        `Blink rate (per min): ${blinkRateEl.textContent}`,
+        "",
+        "This is a prototype alert intended for monitoring drowsy driving in highway trucks.",
+        "Please contact the driver, verify safety conditions, and take appropriate action.",
+        "",
+        "— Prototype dash-cam running in a browser window"
+      ];
+      const body = encodeURIComponent(bodyLines.join("\n"));
+
+      const mailtoLink = `mailto:${ALERT_EMAILS.join(",")}?subject=${subject}&body=${body}`;
+      window.open(mailtoLink, "_blank");
+      logEvent(
+        "info",
+        "Email window opened to notify authorities and truck owner (edit IDs in code)."
+      );
+    }
+
+    async function processFrame() {
+      if (!running || !model || video.readyState < 2) {
+        animationFrameId = requestAnimationFrame(processFrame);
+        return;
+      }
+
+      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+        canvas.width = video.videoWidth || 640;
+        canvas.height = video.videoHeight || 360;
+      }
+
+      const now = performance.now();
+      if (!startTime) {
+        startTime = now;
+        lastFrameTime = now;
+      }
+      const dt = now - lastFrameTime;
+      lastFrameTime = now;
+
+      // Estimate faces with higher internal resolution (long-distance friendly)
+      const predictions = await model.estimateFaces({
+        input: video,
+        predictIrises: true,
+        flipHorizontal: false
+      });
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (predictions.length > 0) {
+        const face = predictions[0];
+        const landmarks = face.mesh || face.scaledMesh || face.keypoints;
+
+        // draw bounding box
+        if (face.boundingBox && face.boundingBox.topLeft && face.boundingBox.bottomRight) {
+          const tl = face.boundingBox.topLeft;
+          const br = face.boundingBox.bottomRight;
+          const x = tl[0];
+          const y = tl[1];
+          const w = br[0] - tl[0];
+          const h = br[1] - tl[1];
+
+          ctx.save();
+          ctx.strokeStyle = "rgba(34,197,94,0.9)";
+          ctx.lineWidth = 2;
+          ctx.shadowColor = "rgba(34,197,94,0.6)";
+          ctx.shadowBlur = 8;
+          ctx.strokeRect(x, y, w, h);
+          ctx.restore();
+        }
+
+        // EAR calculation
+        let ear = null;
+        if (landmarks && landmarks.length > 380) {
+          const earL = computeEAR(landmarks, LEFT_EYE_INDICES);
+          const earR = computeEAR(landmarks, RIGHT_EYE_INDICES);
+          if (earL !== null && earR !== null) {
+            ear = (earL + earR) / 2.0;
+          }
+        }
+
+        // Confidence (approximation)
+        const confidenceScore = face.faceInViewConfidence ?? 0.9;
+        confidenceEl.textContent = (confidenceScore * 100).toFixed(1) + "%";
+
+        if (ear !== null) {
+          earValueEl.textContent = ear.toFixed(3);
+
+          const isClosedNow = ear < EAR_THRESHOLD;
+
+          if (isClosedNow) {
+            if (!eyesClosed) {
+              eyesClosed = true;
+              lastClosedFrameStart = now;
+              closedFrames = 1;
+            } else {
+              closedFrames += 1;
+            }
+
+            const closedMs = now - lastClosedFrameStart;
+            const closedSeconds = closedMs / 1000.0;
+            drowsyTimerEl.textContent = `${closedSeconds.toFixed(1)} s`;
+            eyeStateEl.textContent = closedSeconds > 0.7 ? "CLOSED · possible fatigue" : "BLINK";
+
+            if (closedSeconds >= DROWSY_SECONDS) {
+              ctx.save();
+              ctx.fillStyle = "rgba(220,38,38,0.9)";
+              ctx.font = "bold 28px system-ui, sans-serif";
+              ctx.shadowColor = "rgba(0,0,0,0.7)";
+              ctx.shadowBlur = 10;
+              ctx.fillText("DROWSY ALERT!", 24, 40);
+              ctx.restore();
+
+              triggerDrowsinessAlert(closedSeconds, ear, confidenceScore);
+            }
+          } else {
+            if (eyesClosed && lastClosedFrameStart !== null) {
+              const closedMs = now - lastClosedFrameStart;
+              if (
+                closedMs >= MIN_BLINK_DURATION_MS &&
+                closedMs / 1000.0 < DROWSY_SECONDS &&
+                closedFrames >= STABLE_FRAMES_FOR_BLINK
+              ) {
+                blinks += 1;
+                blinkCountEl.textContent = blinks.toString();
+                logEvent("info", `Blink detected (${blinks} so far).`);
+              }
+            }
+
+            eyesClosed = false;
+            closedFrames = 0;
+            lastClosedFrameStart = null;
+            drowsyTimerEl.textContent = "0.0 s";
+            eyeStateEl.textContent = "OPEN · attentive";
+          }
+        } else {
+          earValueEl.textContent = "—";
+          eyeStateEl.textContent = "Face visible · eyes unclear";
+          drowsyTimerEl.textContent = "0.0 s";
+        }
+      } else {
+        eyeStateEl.textContent = "No face in frame";
+        drowsyTimerEl.textContent = "0.0 s";
+        earValueEl.textContent = "—";
+        confidenceEl.textContent = "—";
+        eyesClosed = false;
+        closedFrames = 0;
+        lastClosedFrameStart = null;
+      }
+
+      const elapsedMs = now - startTime;
+      sessionTimeEl.textContent = formatDuration(elapsedMs);
+      const minutes = elapsedMs / 60000.0 || 1;
+      const blinkRate = blinks / minutes;
+      blinkRateEl.textContent = blinkRate.toFixed(1);
+
+      animationFrameId = requestAnimationFrame(processFrame);
+    }
+
+    async function startMonitoring() {
+      if (running) return;
+
+      try {
+        resetSession();
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          alert("Your browser does not support getUserMedia() for webcam access.");
+          return;
+        }
+
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
+        });
+
+        video.srcObject = stream;
+        await video.play();
+
+        if (!model) {
+          logEvent("info", "Loading face-landmarks model (first time only)...");
+          await tf.setBackend("webgl");
+          await tf.ready();
+          model = await faceLandmarksDetection.load(
+            faceLandmarksDetection.SupportedPackages.mediapipeFacemesh,
+            { maxFaces: 1 }
+          );
+          logEvent("info", "Model loaded. Start blinking to test detection.");
+        }
+
+        setStatus(true);
+        animationFrameId = requestAnimationFrame(processFrame);
+      } catch (err) {
+        console.error(err);
+        alert("Could not start camera or detection. Check webcam permissions and reload.");
+        logEvent("info", "Failed to start monitoring – check camera permission.");
+      }
+    }
+
+    function stopMonitoring() {
+      if (!running && !stream) return;
+
+      setStatus(false);
+
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+
+      if (stream) {
+        stream.getTracks().forEach((t) => t.stop());
+        stream = null;
+      }
+
+      video.srcObject = null;
+      logEvent("info", "Monitoring stopped and camera released.");
+    }
+
+    startBtn.addEventListener("click", startMonitoring);
+    stopBtn.addEventListener("click", stopMonitoring);
+    window.addEventListener("beforeunload", stopMonitoring);
+  </script>
+</body>
+</html>
